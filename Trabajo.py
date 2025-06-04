@@ -1,62 +1,100 @@
 import streamlit as st
 from openai import OpenAI
+import re
 
-# 🔑 Tu clave de API de OpenRouter
-api_key = "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"  # ← Reemplaza con tu clave real
+# Clave de API
+api_key = "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"
+client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
 
-# Crear cliente con base_url para OpenRouter
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://openrouter.ai/api/v1"
-)
-
-# Configuración de la página
-st.set_page_config(page_title="Asistente de Redacción", layout="centered")
-st.title("✍️ Asistente de Redacción (OpenRouter)")
+# Configuración de página
+st.set_page_config(page_title="Reescribir texto", layout="centered")
+st.markdown("## 📝 Reescribe el siguiente texto...")
 
 # Entrada de texto
-user_input = st.text_area("Escribe tu texto aquí:", height=200)
+user_input = st.text_area("Texto:", height=150, max_chars=2048)
+st.caption(f"{len(user_input)} / 2048 caracteres")
 
-# Botón para mejorar la redacción
-if st.button("Mejorar redacción"):
-    if user_input.strip() == "":
+# Controles: Tono, Variantes, Estructura
+col1, col2, col3 = st.columns([2, 2, 2])
+
+with col1:
+    tono_opciones = {
+        "🧑‍💼 Profesional": "profesional",
+        "🏛️ Formal": "formal",
+        "😊 Amistoso": "amistoso",
+        "😎 Informal": "informal",
+        "🤝 Diplomático": "diplomático"
+    }
+    tono_seleccionado = st.selectbox("Tono", list(tono_opciones.keys()), index=0)
+
+with col2:
+    cantidad = st.selectbox("Generar", ["1 variante", "2 variantes"])
+
+with col3:
+    editar_estructura = st.toggle("Editar estructura", value=False)
+
+# Estilo del botón
+st.markdown("""
+<style>
+div.stButton > button:first-child {
+    background-color: #ff7900;
+    color: white;
+    font-weight: bold;
+    border-radius: 5px;
+    height: 3em;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Botón de acción
+if st.button("✨ Reescribir párrafo"):
+    if not user_input.strip():
         st.warning("Por favor, escribe algo.")
     else:
-        with st.spinner("Redactando dos versiones..."):
+        with st.spinner("Reescribiendo..."):
             try:
+                n_variantes = 2 if "2" in cantidad else 1
+                estructura_msg = "Modifica también la estructura del texto." if editar_estructura else "Conserva la estructura del texto."
+
+                if n_variantes == 2:
+                    prompt = (
+                        f"Reescribe el siguiente texto en español con un tono {tono_opciones[tono_seleccionado]}. "
+                        f"{estructura_msg} Devuelve exactamente dos versiones claramente separadas como 'Opción 1:' y 'Opción 2:'. "
+                        "No des ninguna explicación adicional."
+                    )
+                else:
+                    prompt = (
+                        f"Reescribe el siguiente texto en español con un tono {tono_opciones[tono_seleccionado]}. "
+                        f"{estructura_msg} Devuelve solo una versión, sin usar etiquetas como 'Opción 1:' ni 'Opción 2:'. "
+                        "No des ninguna explicación adicional."
+                    )
+
                 response = client.chat.completions.create(
                     model="mistralai/mistral-7b-instruct:free",
                     messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Eres un experto en redacción de textos. "
-                                "Siempre responde en español. "
-                                "Dado un texto, devuelve dos versiones distintas del mismo, bien redactadas, "
-                                "claramente separadas como 'Opción 1:' y 'Opción 2:'. "
-                                "No des ninguna explicación, solo muestra las dos versiones mejoradas."
-                            )
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Mejora este texto en dos versiones: {user_input}"
-                        }
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_input}
                     ],
-                    temperature=0.9
+                    temperature=0.7
                 )
-                resultado = response.choices[0].message.content
-                st.success("Opciones generadas:")
-                
-                # Dividir en dos opciones (si el modelo usó los separadores correctamente)
-                if "Opción 1:" in resultado and "Opción 2:" in resultado:
-                    partes = resultado.split("Opción 2:")
-                    st.markdown("### ✍️ Opción 1")
-                    st.text_area("", value=partes[0].replace("Opción 1:", "").strip(), height=200)
 
-                    st.markdown("### ✍️ Opción 2")
-                    st.text_area("", value=partes[1].strip(), height=200)
+                resultado = response.choices[0].message.content.strip()
+
+                if "Opción 1:" in resultado and "Opción 2:" in resultado and n_variantes == 2:
+                    match = re.search(r"Opción 1:(.*?)Opción 2:(.*)", resultado, re.DOTALL)
+                    if match:
+                        opcion_1 = match.group(1).strip()
+                        opcion_2 = match.group(2).strip()
+                        st.markdown("### 📝 Opción 1")
+                        st.success(opcion_1)
+                        st.markdown("### 📝 Opción 2")
+                        st.success(opcion_2)
+                    else:
+                        st.markdown("### 📝 Resultado")
+                        st.success(resultado)
                 else:
-                    # Si no se separaron bien, mostrar todo junto
-                    st.text_area("Resultado:", value=resultado, height=300)
+                    st.markdown("### 📝 Versión mejorada")
+                    st.success(resultado)
+
             except Exception as e:
-                st.error(f"Ocurrió un error: {str(e)}")
+                st.error(f"Error: {str(e)}")
